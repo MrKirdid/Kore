@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
 local Packages = game:GetService("ReplicatedStorage"):FindFirstChild("Packages")
+	or game:GetService("ReplicatedStorage"):FindFirstChild("Shared"):FindFirstChild("Packages")
 local Log = require(script.Parent.Log)
 
 local Data = {}

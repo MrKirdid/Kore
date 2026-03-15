@@ -1,0 +1,94 @@
+{
+	"name": "kore-framework",
+	"displayName": "Kore Framework",
+	"description": "VS Code extension for the Kore Roblox Luau game framework — autocomplete, diagnostics, type generation, and more.",
+	"version": "0.1.0",
+	"publisher": "mrkirdid",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": [
+		"Programming Languages",
+		"Snippets",
+		"Linters"
+	],
+	"activationEvents": [
+		"onLanguage:luau",
+		"workspaceContains:**/*.luau"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"configuration": {
+			"title": "Kore Framework",
+			"properties": {
+				"kore.servicesPath": {
+					"type": "string",
+					"default": "src/server/services",
+					"description": "Path to the services directory (relative to workspace root)"
+				},
+				"kore.controllersPath": {
+					"type": "string",
+					"default": "src/client/controllers",
+					"description": "Path to the controllers directory (relative to workspace root)"
+				},
+				"kore.typesOutputPath": {
+					"type": "string",
+					"default": "src/shared/Kore/Types.luau",
+					"description": "Output path for the generated Types.luau file"
+				},
+				"kore.enableDiagnostics": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable Kore diagnostics (name mismatches, unknown deps, etc.)"
+				},
+				"kore.enableSnippets": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable Kore snippets (::preset, :AddService, :AddController)"
+				},
+				"kore.fuzzyThreshold": {
+					"type": "number",
+					"default": 0.4,
+					"minimum": 0,
+					"maximum": 1,
+					"description": "Fuzzy matching threshold (0 = exact match only, 1 = match anything)"
+				},
+				"kore.debug": {
+					"type": "boolean",
+					"default": false,
+					"description": "Log extension internals to the Kore output channel"
+				}
+			}
+		},
+		"commands": [
+			{
+				"command": "kore.refreshTypes",
+				"title": "Kore: Refresh Types"
+			},
+			{
+				"command": "kore.openDocs",
+				"title": "Kore: Open Documentation"
+			},
+			{
+				"command": "kore.showRegistry",
+				"title": "Kore: Show Service Registry"
+			}
+		]
+	},
+	"scripts": {
+		"build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+		"watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+		"test": "vitest run",
+		"package": "vsce package"
+	},
+	"devDependencies": {
+		"@types/node": "^18.0.0",
+		"@types/vscode": "^1.85.0",
+		"esbuild": "^0.20.0",
+		"typescript": "^5.3.0",
+		"vitest": "^1.2.0"
+	},
+	"dependencies": {
+		"fuse.js": "^7.0.0"
+	}
+}

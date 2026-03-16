@@ -1,9 +1,13 @@
 -- Kore.Janitor — Re-export of howmanysmall/janitor
 
-local Packages = game:GetService("ReplicatedStorage"):FindFirstChild("Packages")
+local resolve = require(script.Parent.PackageResolver)
+local Types = require(script.Parent.Types)
+
+type Janitor = Types.Janitor
+type JanitorTask = Types.JanitorTask
 
 local ok, Janitor = pcall(function()
-	return require(Packages and Packages:FindFirstChild("janitor") or error("not found"))
+	return require(resolve("janitor") or error("not found"))
 end)
 
 if ok then
@@ -14,47 +18,52 @@ end
 local JanitorFallback = {}
 JanitorFallback.__index = JanitorFallback
 
-function JanitorFallback.new()
+--- Create a new Janitor for deterministic cleanup.
+function JanitorFallback.new(): Types.Janitor
 	return setmetatable({
-		_tasks = {},
-	}, JanitorFallback)
+		_tasks = {} :: { [any]: JanitorTask },
+	}, JanitorFallback) :: any
 end
 
-function JanitorFallback:Add(task, methodName, index)
-	local entry = { task = task, method = methodName or "Destroy" }
+--- Add a task to be cleaned up. Returns the task for chaining.
+function JanitorFallback:Add<T>(taskObj: T, methodName: string?, index: any?): T
+	local entry: JanitorTask = { task = taskObj, method = methodName or "Destroy" }
 	if index then
 		self._tasks[index] = entry
 	else
 		table.insert(self._tasks, entry)
 	end
-	return task
+	return taskObj
 end
 
-function JanitorFallback:Remove(index)
+--- Remove a task by its index key.
+function JanitorFallback:Remove(index: any): ()
 	self._tasks[index] = nil
 end
 
-function JanitorFallback:Cleanup()
+--- Clean up all tracked tasks in reverse order.
+function JanitorFallback:Cleanup(): ()
 	for i = #self._tasks, 1, -1 do
-		local entry = self._tasks[i]
+		local entry: JanitorTask? = self._tasks[i]
 		if entry then
-			local task = entry.task
-			if type(task) == "function" then
-				task()
-			elseif typeof(task) == "RBXScriptConnection" then
-				task:Disconnect()
-			elseif type(task) == "table" and type(task[entry.method]) == "function" then
-				task[entry.method](task)
-			elseif typeof(task) == "Instance" then
-				task:Destroy()
+			local taskObj: any = entry.task
+			if type(taskObj) == "function" then
+				(taskObj :: () -> ())()
+			elseif typeof(taskObj) == "RBXScriptConnection" then
+				(taskObj :: RBXScriptConnection):Disconnect()
+			elseif type(taskObj) == "table" and type(taskObj[entry.method]) == "function" then
+				taskObj[entry.method](taskObj)
+			elseif typeof(taskObj) == "Instance" then
+				(taskObj :: Instance):Destroy()
 			end
 		end
 	end
 	table.clear(self._tasks)
 end
 
-function JanitorFallback:Destroy()
+--- Alias for Cleanup. Destroys the janitor by cleaning all tasks.
+function JanitorFallback:Destroy(): ()
 	self:Cleanup()
 end
 
-return JanitorFallback
+return JanitorFallback :: Types.JanitorModule

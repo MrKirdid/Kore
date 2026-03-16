@@ -21,11 +21,11 @@ export function parseController(source: string, filePath: string): ControllerInf
 
   for (const fn of allFunctions) {
     if (lifecycleNames.has(fn.name)) continue;
-    const params = fn.params.filter(p => p !== 'self');
+    const params = fn.params.filter(p => p.name !== 'self');
     methods.push({
       name: fn.name,
       params,
-      returnType: fn.hasReturn ? 'any' : null,
+      returnType: fn.returnType,
     });
   }
 

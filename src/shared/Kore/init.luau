@@ -3,39 +3,45 @@
 
 local RunService = game:GetService("RunService")
 
-local IS_SERVER = RunService:IsServer()
+local IS_SERVER: boolean = RunService:IsServer()
 
+local Types = require(script.Types)
 local Symbol = require(script.Symbol)
-local Log = require(script.Log)
-local Proxy = require(script.Proxy)
-local Loader = require(script.Loader)
-local Net = require(script.Net)
-local Signal = require(script.Signal)
-local Timer = require(script.Timer)
-local Tween = require(script.Tween)
-local Curve = require(script.Curve)
-local Data = require(script.Data)
-local Thread = require(script.Thread)
-local Mock = require(script.Mock)
-local Janitor = require(script.Janitor)
-local Util = require(script.Util)
+local Log = require(script.Log) :: Types.LogModule
+local Proxy = require(script.Proxy) :: Types.ProxyModule
+local Loader = require(script.Loader) :: Types.LoaderModule
+local Net = require(script.Net) :: Types.NetModule
+local Signal = require(script.Signal) :: Types.SignalModule
+local Timer = require(script.Timer) :: Types.TimerModule
+local Tween = require(script.Tween) :: Types.TweenModule
+local Curve = require(script.Curve) :: Types.CurveModule
+local Data = require(script.Data) :: Types.DataModule
+local Thread = require(script.Thread) :: Types.ThreadModule
+local Mock = require(script.Mock) :: Types.MockModule
+local Janitor = require(script.Janitor) :: Types.JanitorModule
+local Util = require(script.Util) :: Types.UtilModule
 
-local Packages = game:GetService("ReplicatedStorage"):FindFirstChild("Packages")
-local Promise = require(Packages and Packages:FindFirstChild("promise") or script.Promise)
+local resolve = require(script.PackageResolver)
+local Promise = require(resolve("promise") or script.Promise)
 
 -- ──────────────────────────────────────────────────────────────────────
 -- State
 -- ──────────────────────────────────────────────────────────────────────
 
-local services = {} -- [name] = service instance
-local controllers = {} -- [name] = controller instance
-local proxies = {} -- [name] = { proxy, resolve }
-local clientProxies = {} -- [name] = client proxy (client-side)
+type ProxyEntry = {
+	proxy: any,
+	resolve: Types.ProxyResolveFn,
+}
 
-local started = false
-local configured = false
+local services: { [string]: Types.ServiceDefinition } = {} -- [name] = service instance
+local controllers: { [string]: Types.ControllerDefinition } = {} -- [name] = controller instance
+local proxies: { [string]: ProxyEntry } = {} -- [name] = { proxy, resolve }
+local clientProxies: { [string]: { [string]: any } } = {} -- [name] = client proxy (client-side)
 
-local config = {
+local started: boolean = false
+local configured: boolean = false
+
+local config: Types.KoreConfig & { Log: Types.KoreLogConfig } = {
 	Debug = false,
 	Destroy = "shutdown",
 	Log = {
@@ -77,7 +83,8 @@ end)
 -- Configuration
 -- ──────────────────────────────────────────────────────────────────────
 
-function Kore.Configure(userConfig)
+--- Configure the Kore framework. Must be called before `Start()`.
+function Kore.Configure(userConfig: Types.KoreConfig): ()
 	if started then
 		error("[Kore] Configure() must be called before Start()", 2)
 	end
@@ -107,16 +114,17 @@ end
 -- Registration
 -- ──────────────────────────────────────────────────────────────────────
 
-local function createJanitor()
+local function createJanitor(): Types.Janitor
 	return Janitor.new()
 end
 
-local function setupServiceInstance(svc)
+local function setupServiceInstance(svc: Types.ServiceDefinition): ()
 	svc.Janitor = svc.Janitor or createJanitor()
 	svc.Log = Log.Tagged(svc.Name)
 end
 
-function Kore.AddService(serviceTable)
+--- Register a service (server only). The service table must have a `Name` field.
+function Kore.AddService(serviceTable: Types.ServiceDefinition): ()
 	if not IS_SERVER then
 		error("[Kore] AddService() can only be called on the server", 2)
 	end
@@ -135,7 +143,8 @@ function Kore.AddService(serviceTable)
 	Log.Debug("Kore", "Registered service: %s", serviceTable.Name)
 end
 
-function Kore.AddController(controllerTable)
+--- Register a controller (client only). The controller table must have a `Name` field.
+function Kore.AddController(controllerTable: Types.ControllerDefinition): ()
 	if IS_SERVER then
 		error("[Kore] AddController() can only be called on the client", 2)
 	end
@@ -155,11 +164,60 @@ function Kore.AddController(controllerTable)
 	Log.Debug("Kore", "Registered controller: %s", controllerTable.Name)
 end
 
+--- Create and register a service (server only). Returns the service with injected Janitor/Log.
+--- Use `:` method syntax after this call for full self IntelliSense.
+function Kore.CreateService<T>(serviceTable: T & { Name: string }): T & Types.ServiceFields
+	if not IS_SERVER then
+		error("[Kore] CreateService() can only be called on the server", 2)
+	end
+
+	local svc = serviceTable :: any
+	if not svc.Name then
+		error("[Kore] Service is missing a Name field", 2)
+	end
+
+	if services[svc.Name] then
+		error("[Kore] Duplicate service name: " .. svc.Name, 2)
+	end
+
+	setupServiceInstance(svc)
+	services[svc.Name] = svc
+
+	Log.Debug("Kore", "Registered service: %s", svc.Name)
+	return serviceTable :: any
+end
+
+--- Create and register a controller (client only). Returns the controller with injected Janitor/Log.
+--- Use `:` method syntax after this call for full self IntelliSense.
+function Kore.CreateController<T>(controllerTable: T & { Name: string }): T & Types.ControllerFields
+	if IS_SERVER then
+		error("[Kore] CreateController() can only be called on the client", 2)
+	end
+
+	local ctrl = controllerTable :: any
+	if not ctrl.Name then
+		error("[Kore] Controller is missing a Name field", 2)
+	end
+
+	if controllers[ctrl.Name] then
+		error("[Kore] Duplicate controller name: " .. ctrl.Name, 2)
+	end
+
+	ctrl.Janitor = ctrl.Janitor or createJanitor()
+	ctrl.Log = Log.Tagged(ctrl.Name)
+	controllers[ctrl.Name] = ctrl
+
+	Log.Debug("Kore", "Registered controller: %s", ctrl.Name)
+	return controllerTable :: any
+end
+
 -- ──────────────────────────────────────────────────────────────────────
 -- Retrieval
 -- ──────────────────────────────────────────────────────────────────────
 
-function Kore.GetService(name)
+--- Retrieve a service by name. On the server returns the real service; on the client returns a network proxy.
+--- During Init, returns a deferred proxy that resolves after boot.
+function Kore.GetService(name: string): Types.ServiceDefinition
 	-- Server: return real service or proxy during Init
 	if IS_SERVER then
 		local svc = services[name]
@@ -174,7 +232,7 @@ function Kore.GetService(name)
 			end
 
 			local proxy, resolve = Proxy.create(name)
-			proxies[name] = { proxy = proxy, resolve = resolve }
+			proxies[name] = { proxy = proxy, resolve = resolve } :: ProxyEntry
 			Log.Debug("Kore", "Created proxy for undeclared GetService('%s') during Init", name)
 			return proxy
 		end
@@ -184,7 +242,7 @@ function Kore.GetService(name)
 
 	-- Client: return client proxy
 	if clientProxies[name] then
-		return clientProxies[name]
+		return clientProxies[name] :: any
 	end
 
 	if not started then
@@ -194,14 +252,16 @@ function Kore.GetService(name)
 		end
 
 		local proxy, resolve = Proxy.create(name)
-		proxies[name] = { proxy = proxy, resolve = resolve }
+		proxies[name] = { proxy = proxy, resolve = resolve } :: ProxyEntry
 		return proxy
 	end
 
 	error("[Kore] Unknown service: " .. tostring(name), 2)
 end
 
-function Kore.GetController(name)
+--- Retrieve a controller by name (client only).
+--- During Init, returns a deferred proxy that resolves after boot.
+function Kore.GetController(name: string): Types.ControllerDefinition
 	if IS_SERVER then
 		error("[Kore] GetController() can only be called on the client", 2)
 	end
@@ -217,7 +277,7 @@ function Kore.GetController(name)
 		end
 
 		local proxy, resolve = Proxy.create(name)
-		proxies[name] = { proxy = proxy, resolve = resolve }
+		proxies[name] = { proxy = proxy, resolve = resolve } :: ProxyEntry
 		return proxy
 	end
 
@@ -228,7 +288,8 @@ end
 -- Boot
 -- ──────────────────────────────────────────────────────────────────────
 
-function Kore.Start()
+--- Boot the Kore framework. Returns a Promise that resolves when all lifecycle methods complete.
+function Kore.Start(): any -- Promise<void>
 	if started then
 		return Promise.reject("[Kore] Already started")
 	end
@@ -251,34 +312,34 @@ function Kore.Start()
 	end)
 end
 
-function Kore._startServer()
-	local startTime = os.clock()
+function Kore._startServer(): ()
+	local startTime: number = os.clock()
 
 	-- Auto-discover services if none registered
 	if next(services) == nil then
-		local servicesFolder = game:GetService("ServerScriptService"):FindFirstChild("Services")
+		local servicesFolder: Instance? = game:GetService("ServerScriptService"):FindFirstChild("Services")
 		if servicesFolder then
-			local discovered = Loader.DiscoverModules(servicesFolder)
+			local discovered: { Types.NamedModule } = Loader.DiscoverModules(servicesFolder :: Instance)
 			for _, svc in ipairs(discovered) do
 				if not services[svc.Name] then
-					setupServiceInstance(svc)
-					services[svc.Name] = svc
+					setupServiceInstance(svc :: any)
+					services[svc.Name] = svc :: any
 				end
 			end
 		end
 	end
 
 	-- Build module list for topo sort
-	local moduleList = {}
+	local moduleList: { Types.NamedModule } = {}
 	for _, svc in pairs(services) do
-		table.insert(moduleList, svc)
+		table.insert(moduleList, svc :: any)
 	end
 
 	-- Topological sort
-	local sorted = Loader.TopologicalSort(moduleList)
+	local sorted: { Types.NamedModule } = Loader.TopologicalSort(moduleList)
 
 	if config.Debug then
-		local order = {}
+		local order: { string } = {}
 		for _, svc in ipairs(sorted) do
 			table.insert(order, svc.Name)
 		end
@@ -287,8 +348,8 @@ function Kore._startServer()
 
 	-- Init phase (synchronous, in dependency order)
 	for _, svc in ipairs(sorted) do
-		if svc.Init then
-			local initStart = os.clock()
+		if (svc :: any).Init then
+			local initStart: number = os.clock()
 
 			-- Inject declared dependencies
 			if svc.Dependencies then
@@ -299,10 +360,10 @@ function Kore._startServer()
 				end
 			end
 
-			local ctx = {
-				Log = svc.Log,
-				Kore = Kore,
-				Config = svc.Config,
+			local ctx: Types.ContextType = {
+				Log = (svc :: any).Log,
+				Kore = Kore :: any,
+				Config = (svc :: any).Config,
 			}
 
 			-- Detect yielding
@@ -335,24 +396,24 @@ function Kore._startServer()
 
 	-- Setup remotes for all services
 	for _, svc in ipairs(sorted) do
-		Net.SetupServerRemotes(svc)
+		Net.SetupServerRemotes(svc :: any)
 	end
 
 	-- Start phase (concurrent, yielding allowed)
-	local startPromises = {}
+	local startPromises: { any } = {}
 	for _, svc in ipairs(sorted) do
-		if svc.Start then
+		if (svc :: any).Start then
 			table.insert(
 				startPromises,
 				Promise.new(function(resolveStart)
-					local ctx = {
-						Log = svc.Log,
-						Kore = Kore,
-						Config = svc.Config,
+					local ctx: Types.ContextType = {
+						Log = (svc :: any).Log,
+						Kore = Kore :: any,
+						Config = (svc :: any).Config,
 					}
 
-					local startStartTime = os.clock()
-					svc:Start(ctx)
+					local startStartTime: number = os.clock();
+					(svc :: any):Start(ctx)
 
 					if config.Debug then
 						Log.Debug(
@@ -378,22 +439,22 @@ function Kore._startServer()
 	end
 end
 
-function Kore._startClient()
-	local startTime = os.clock()
+function Kore._startClient(): ()
+	local startTime: number = os.clock()
 
 	-- Auto-discover controllers
 	if next(controllers) == nil then
-		local controllersFolder = game:GetService("Players").LocalPlayer
+		local controllersFolder: Instance? = game:GetService("Players").LocalPlayer
 			and game:GetService("Players").LocalPlayer:WaitForChild("PlayerScripts", 10)
 
 		if controllersFolder then
-			local ctrlFolder = controllersFolder:FindFirstChild("Controllers")
+			local ctrlFolder: Instance? = (controllersFolder :: Instance):FindFirstChild("Controllers")
 			if ctrlFolder then
-				local discovered = Loader.DiscoverModules(ctrlFolder)
+				local discovered: { Types.NamedModule } = Loader.DiscoverModules(ctrlFolder :: Instance)
 				for _, ctrl in ipairs(discovered) do
 					if not controllers[ctrl.Name] then
-						ctrl.Janitor = ctrl.Janitor or createJanitor()
-						ctrl.Log = Log.Tagged(ctrl.Name)
+						(ctrl :: any).Janitor = (ctrl :: any).Janitor or createJanitor();
+						(ctrl :: any).Log = Log.Tagged(ctrl.Name)
 						controllers[ctrl.Name] = ctrl
 					end
 				end
@@ -402,15 +463,15 @@ function Kore._startClient()
 	end
 
 	-- Build client proxies for services (from remotes)
-	local remotesFolder = game:GetService("ReplicatedStorage"):WaitForChild("KoreRemotes", 30)
+	local remotesFolder: Instance? = game:GetService("ReplicatedStorage"):WaitForChild("KoreRemotes", 30)
 	if remotesFolder then
-		for _, serviceFolder in ipairs(remotesFolder:GetChildren()) do
-			clientProxies[serviceFolder.Name] = Net.CreateClientProxy(serviceFolder.Name, Promise)
+		for _, serviceFolder in ipairs((remotesFolder :: Instance):GetChildren()) do
+			clientProxies[serviceFolder.Name] = Net.CreateClientProxy(serviceFolder.Name, Promise) :: any
 		end
 	end
 
 	-- Resolve service proxies
-	for name, proxyData in pairs(proxies) do
+	for name, proxyData: ProxyEntry in pairs(proxies) do
 		if clientProxies[name] then
 			proxyData.resolve(clientProxies[name])
 		elseif controllers[name] then
@@ -419,15 +480,15 @@ function Kore._startClient()
 	end
 
 	-- Build module list for topo sort
-	local moduleList = {}
+	local moduleList: { Types.NamedModule } = {}
 	for _, ctrl in pairs(controllers) do
-		table.insert(moduleList, ctrl)
+		table.insert(moduleList, ctrl :: any)
 	end
 
-	local sorted = Loader.TopologicalSort(moduleList)
+	local sorted: { Types.NamedModule } = Loader.TopologicalSort(moduleList)
 
 	if config.Debug then
-		local order = {}
+		local order: { string } = {}
 		for _, ctrl in ipairs(sorted) do
 			table.insert(order, ctrl.Name)
 		end
@@ -436,8 +497,8 @@ function Kore._startClient()
 
 	-- Init phase
 	for _, ctrl in ipairs(sorted) do
-		if ctrl.Init then
-			local initStart = os.clock()
+		if (ctrl :: any).Init then
+			local initStart: number = os.clock()
 
 			if ctrl.Dependencies then
 				for _, depName in ipairs(ctrl.Dependencies) do
@@ -449,14 +510,14 @@ function Kore._startClient()
 				end
 			end
 
-			local ctx = {
-				Log = ctrl.Log,
-				Kore = Kore,
-				Config = ctrl.Config,
+			local ctx: Types.ContextType = {
+				Log = (ctrl :: any).Log,
+				Kore = Kore :: any,
+				Config = (ctrl :: any).Config,
 			}
 
-			local initThread = coroutine.create(function()
-				ctrl:Init(ctx)
+			local initThread: thread = coroutine.create(function()
+				(ctrl :: any):Init(ctx)
 			end)
 
 			local success, result = coroutine.resume(initThread)
@@ -481,19 +542,21 @@ function Kore._startClient()
 
 	-- Start phase
 	local startPromises = {}
+	-- Start phase
+	local startPromises: { any } = {}
 	for _, ctrl in ipairs(sorted) do
-		if ctrl.Start then
+		if (ctrl :: any).Start then
 			table.insert(
 				startPromises,
 				Promise.new(function(resolveStart)
-					local ctx = {
-						Log = ctrl.Log,
-						Kore = Kore,
-						Config = ctrl.Config,
+					local ctx: Types.ContextType = {
+						Log = (ctrl :: any).Log,
+						Kore = Kore :: any,
+						Config = (ctrl :: any).Config,
 					}
 
-					local startStartTime = os.clock()
-					ctrl:Start(ctx)
+					local startStartTime: number = os.clock();
+					(ctrl :: any):Start(ctx)
 
 					if config.Debug then
 						Log.Debug(
@@ -523,24 +586,25 @@ end
 -- Dynamic Destroy
 -- ──────────────────────────────────────────────────────────────────────
 
-function Kore.DestroyService(name)
+--- Dynamically destroy and unregister a service. Requires `Destroy = "dynamic"` config.
+function Kore.DestroyService(name: string): ()
 	if config.Destroy ~= "dynamic" then
 		error("[Kore] DestroyService requires Configure({ Destroy = 'dynamic' })", 2)
 	end
 
-	local svc = services[name]
+	local svc: Types.ServiceDefinition? = services[name]
 	if not svc then
 		error("[Kore] Unknown service: " .. tostring(name), 2)
 	end
 
 	-- 1. Call Destroy() if defined
-	if svc.Destroy then
-		svc:Destroy()
+	if (svc :: Types.ServiceDefinition).Destroy then
+		(svc :: Types.ServiceDefinition):Destroy()
 	end
 
 	-- 2. Clean janitor
-	if svc.Janitor then
-		svc.Janitor:Cleanup()
+	if (svc :: Types.ServiceDefinition).Janitor then
+		(svc :: Types.ServiceDefinition).Janitor:Cleanup()
 	end
 
 	-- 3. Remove remotes
@@ -552,22 +616,23 @@ function Kore.DestroyService(name)
 	Log.Debug("Kore", "Destroyed service: %s", name)
 end
 
-function Kore.DestroyController(name)
+--- Dynamically destroy and unregister a controller. Requires `Destroy = "dynamic"` config.
+function Kore.DestroyController(name: string): ()
 	if config.Destroy ~= "dynamic" then
 		error("[Kore] DestroyController requires Configure({ Destroy = 'dynamic' })", 2)
 	end
 
-	local ctrl = controllers[name]
+	local ctrl: Types.ControllerDefinition? = controllers[name]
 	if not ctrl then
 		error("[Kore] Unknown controller: " .. tostring(name), 2)
 	end
 
-	if ctrl.Destroy then
-		ctrl:Destroy()
+	if (ctrl :: Types.ControllerDefinition).Destroy then
+		(ctrl :: Types.ControllerDefinition):Destroy()
 	end
 
-	if ctrl.Janitor then
-		ctrl.Janitor:Cleanup()
+	if (ctrl :: Types.ControllerDefinition).Janitor then
+		(ctrl :: Types.ControllerDefinition).Janitor:Cleanup()
 	end
 
 	controllers[name] = nil
@@ -575,4 +640,4 @@ function Kore.DestroyController(name)
 	Log.Debug("Kore", "Destroyed controller: %s", name)
 end
 
-return Kore
+return Kore :: Types.KoreAPI

@@ -1,3 +1,0 @@
--- Place service ModuleScripts here.
--- Each service must return a table with a Name field.
--- See the Kore documentation for the full service structure.

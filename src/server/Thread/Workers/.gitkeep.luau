@@ -1,2 +1,0 @@
--- Place Weave worker scripts here.
--- Workers are Actors in the DataModel for parallel Luau execution.

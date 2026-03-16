@@ -9,12 +9,18 @@ export interface LuauTableField {
   line: number;
 }
 
+export interface LuauParam {
+  name: string;
+  type: string;
+}
+
 export interface LuauFunction {
   name: string;
-  params: string[];
+  params: LuauParam[];
   body: string;
   line: number;
   hasReturn: boolean;
+  returnType: string | null;
 }
 
 /**
@@ -41,30 +47,103 @@ export function extractDependencies(source: string): string[] {
 }
 
 /**
- * Extract all top-level functions from a table literal.
+ * Extract all top-level functions from a table literal or module-level colon/dot definitions.
+ *
+ * When `excludeRange` is provided (start/end character indices), matches whose
+ * start falls inside that range are skipped — this lets callers exclude the
+ * Client table so its functions don't leak into top-level results.
  */
-export function extractFunctions(source: string): LuauFunction[] {
+function parseParams(paramsStr: string): LuauParam[] {
+  if (!paramsStr.trim()) return [];
+  return paramsStr.split(',').map(p => {
+    const trimmed = p.trim();
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx >= 0) {
+      return { name: trimmed.substring(0, colonIdx).trim(), type: trimmed.substring(colonIdx + 1).trim() };
+    }
+    return { name: trimmed, type: 'any' };
+  }).filter(p => p.name.length > 0);
+}
+
+function extractReturnType(source: string, afterIndex: number): string | null {
+  const rest = source.substring(afterIndex);
+  const rtMatch = rest.match(/^\s*:\s*(\S[^\n]*?)\s*(?:\n|$)/);
+  return rtMatch ? rtMatch[1].trim() : null;
+}
+
+export function extractFunctions(source: string, excludeRange?: { start: number; end: number }): LuauFunction[] {
   const functions: LuauFunction[] = [];
-  const pattern = /(\w+)\s*=\s*function\s*\(([^)]*)\)/g;
+
+  // Pattern 1: Table-inline: Name = function(params)
+  const pattern1 = /(\w+)\s*=\s*function\s*\(([^)]*)\)/g;
   let match;
 
-  while ((match = pattern.exec(source)) !== null) {
-    const name = match[1];
-    const paramsStr = match[2];
-    const params = paramsStr
-      .split(',')
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
+  while ((match = pattern1.exec(source)) !== null) {
+    if (excludeRange && match.index >= excludeRange.start && match.index < excludeRange.end) continue;
 
-    // Check if this function has a return statement (simple heuristic)
-    const bodyStart = match.index + match[0].length;
-    const bodyEnd = findMatchingEnd(source, bodyStart);
+    const name = match[1];
+    const params = parseParams(match[2]);
+    const afterParen = match.index + match[0].length;
+    const declaredReturn = extractReturnType(source, afterParen);
+
+    const bodyStart = declaredReturn ? source.indexOf('\n', afterParen) + 1 : afterParen;
+    const bodyEnd = findMatchingEnd(source, afterParen);
     const body = source.substring(bodyStart, bodyEnd);
     const hasReturn = /\breturn\b/.test(body);
+    const returnType = declaredReturn || (hasReturn ? 'any' : null);
 
     const line = source.substring(0, match.index).split('\n').length;
 
-    functions.push({ name, params, body, line, hasReturn });
+    functions.push({ name, params, body, line, hasReturn, returnType });
+  }
+
+  // Pattern 2: Colon syntax: function VarName:MethodName(params)
+  const pattern2 = /function\s+\w+:(\w+)\s*\(([^)]*)\)/g;
+
+  while ((match = pattern2.exec(source)) !== null) {
+    if (excludeRange && match.index >= excludeRange.start && match.index < excludeRange.end) continue;
+
+    const name = match[1];
+    const params = parseParams(match[2]);
+    const afterParen = match.index + match[0].length;
+    const declaredReturn = extractReturnType(source, afterParen);
+
+    const bodyStart = declaredReturn ? source.indexOf('\n', afterParen) + 1 : afterParen;
+    const bodyEnd = findMatchingEnd(source, afterParen);
+    const body = source.substring(bodyStart, bodyEnd);
+    const hasReturn = /\breturn\b/.test(body);
+    const returnType = declaredReturn || (hasReturn ? 'any' : null);
+
+    const line = source.substring(0, match.index).split('\n').length;
+
+    // Colon syntax has implicit self, no need to add it
+    functions.push({ name, params, body, line, hasReturn, returnType });
+  }
+
+  // Pattern 3: Dot syntax: function VarName.MethodName(self, ...params)
+  const pattern3 = /function\s+\w+\.(\w+)\s*\(([^)]*)\)/g;
+
+  while ((match = pattern3.exec(source)) !== null) {
+    if (excludeRange && match.index >= excludeRange.start && match.index < excludeRange.end) continue;
+
+    const name = match[1];
+    // Skip if this looks like VarName.Client.MethodName (handled separately)
+    const fullMatch = source.substring(Math.max(0, match.index - 20), match.index + match[0].length);
+    if (/\.Client\./.test(fullMatch)) continue;
+
+    const params = parseParams(match[2]);
+    const afterParen = match.index + match[0].length;
+    const declaredReturn = extractReturnType(source, afterParen);
+
+    const bodyStart = declaredReturn ? source.indexOf('\n', afterParen) + 1 : afterParen;
+    const bodyEnd = findMatchingEnd(source, afterParen);
+    const body = source.substring(bodyStart, bodyEnd);
+    const hasReturn = /\breturn\b/.test(body);
+    const returnType = declaredReturn || (hasReturn ? 'any' : null);
+
+    const line = source.substring(0, match.index).split('\n').length;
+
+    functions.push({ name, params, body, line, hasReturn, returnType });
   }
 
   return functions;
@@ -72,16 +151,62 @@ export function extractFunctions(source: string): LuauFunction[] {
 
 /**
  * Extract the Client table content.
+ * Prefers external assignment (`VarName.Client = {`) over inline (`Client = {` inside
+ * CreateService). This is critical because auto-templates may include an empty inline
+ * `Client = {}` placeholder — the external assignment is the one with actual methods.
+ *
+ * When multiple matches exist, picks the one with the most content (largest range).
  */
-export function extractClientTable(source: string): string | null {
-  const match = source.match(/Client\s*=\s*\{/);
-  if (!match || match.index === undefined) return null;
+export function extractClientTable(source: string): { content: string; start: number; end: number } | null {
+  // Collect all candidate matches
+  const candidates: { content: string; start: number; end: number; external: boolean }[] = [];
 
-  const start = match.index + match[0].length;
-  const end = findMatchingBrace(source, start - 1);
-  if (end === -1) return null;
+  // Pattern 1: External assignment — VarName.Client = {
+  const externalPattern = /\w+\.Client\s*=\s*\{/g;
+  let m;
+  while ((m = externalPattern.exec(source)) !== null) {
+    const braceIndex = source.indexOf('{', m.index);
+    if (braceIndex === -1) continue;
+    const end = findMatchingBrace(source, braceIndex);
+    if (end === -1) continue;
+    candidates.push({
+      content: source.substring(braceIndex + 1, end),
+      start: braceIndex,
+      end: end + 1,
+      external: true,
+    });
+  }
 
-  return source.substring(start, end);
+  // Pattern 2: Inline — Client = { (inside a table literal)
+  const inlinePattern = /(?:^|[\s,])Client\s*=\s*\{/gm;
+  while ((m = inlinePattern.exec(source)) !== null) {
+    const braceIndex = source.indexOf('{', m.index);
+    if (braceIndex === -1) continue;
+    const end = findMatchingBrace(source, braceIndex);
+    if (end === -1) continue;
+    // Skip if this overlaps an already-found external match
+    const overlaps = candidates.some(c => c.external && braceIndex >= c.start && braceIndex < c.end);
+    if (overlaps) continue;
+    candidates.push({
+      content: source.substring(braceIndex + 1, end),
+      start: braceIndex,
+      end: end + 1,
+      external: false,
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Prefer external assignments; among those, pick the largest
+  const externals = candidates.filter(c => c.external);
+  if (externals.length > 0) {
+    externals.sort((a, b) => b.content.length - a.content.length);
+    return externals[0];
+  }
+
+  // Fallback to inline, pick the largest
+  candidates.sort((a, b) => b.content.length - a.content.length);
+  return candidates[0];
 }
 
 /**

@@ -1,7 +1,7 @@
 -- examples/Multithreading/ComputeWorker.luau
 -- Worker script for parallel computation.
 
-local Kore = require(game.ReplicatedStorage.Shared.Kore)
+local Kore = require(game.ReplicatedStorage.Shared.Packages.kore)
 
 local kernel = Kore.Thread.Kernel(script)
 

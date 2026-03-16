@@ -1,10 +1,10 @@
 -- examples/DataStore/DataService.luau
 -- Demonstrates Kore.Data for ProfileStore integration.
 
-local Kore = require(game.ReplicatedStorage.Shared.Kore)
+local Kore = require(game.ReplicatedStorage.Shared.Packages.kore)
 local Players = game:GetService("Players")
 
-return {
+local DataService = Kore.CreateService({
 	Name = "DataService",
 
 	Config = {
@@ -15,36 +15,38 @@ return {
 			Inventory = {},
 		},
 	},
+})
 
-	Client = {
-		GetCoins = function(self, player)
-			local profile = Kore.Data.Get(player)
-			if profile then
-				return profile.Data.Coins
-			end
-			return 0
-		end,
-
-		CoinsUpdated = Kore.NetEvent,
-	},
-
-	Init = function(self, ctx)
-		Kore.Data.Configure({
-			StoreName = ctx.Config.StoreName,
-			Template = ctx.Config.Template,
-		})
+DataService.Client = {
+	GetCoins = function(self, player)
+		local profile = Kore.Data.Get(player)
+		if profile then
+			return profile.Data.Coins
+		end
+		return 0
 	end,
 
-	Start = function(self, ctx)
-		Players.PlayerAdded:Connect(function(player)
-			Kore.Data
-				.Load(player)
-				:andThen(function(profile)
-					ctx.Log.Info("Loaded profile for %s", player.Name)
-				end)
-				:catch(function(err)
-					ctx.Log.Warn("Failed to load profile for %s: %s", player.Name, tostring(err))
-				end)
-		end)
-	end,
+	CoinsUpdated = Kore.NetEvent,
 }
+
+function DataService:Init(ctx)
+	Kore.Data.Configure({
+		StoreName = self.Config.StoreName,
+		Template = self.Config.Template,
+	})
+end
+
+function DataService:Start(ctx)
+	Players.PlayerAdded:Connect(function(player)
+		Kore.Data
+			.Load(player)
+			:andThen(function(profile)
+				ctx.Log.Info("Loaded profile for %s", player.Name)
+			end)
+			:catch(function(err)
+				ctx.Log.Warn("Failed to load profile for %s: %s", player.Name, tostring(err))
+			end)
+	end)
+end
+
+return DataService

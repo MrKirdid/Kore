@@ -1,23 +1,27 @@
 -- examples/BasicService/ExampleController.luau
 -- A minimal controller that consumes ExampleService.
 
-return {
+local Kore = require(game.ReplicatedStorage.Shared.Packages.kore)
+
+local ExampleController = Kore.CreateController({
 	Name = "ExampleController",
 	Dependencies = { "ExampleService" },
+})
 
-	Init = function(self, ctx)
-		ctx.Log.Info("Initializing ExampleController")
-	end,
+function ExampleController:Init(ctx)
+	ctx.Log.Info("Initializing ExampleController")
+end
 
-	Start = function(self, ctx)
-		local ExampleService = ctx.Kore.GetService("ExampleService")
+function ExampleController:Start(ctx)
+	local ExampleService = ctx.Kore.GetService("ExampleService")
 
-		ExampleService.GetGreeting():andThen(function(greeting)
-			ctx.Log.Info("Got greeting: %s", greeting)
-		end)
+	ExampleService.GetGreeting():andThen(function(greeting)
+		ctx.Log.Info("Got greeting: %s", greeting)
+	end)
 
-		ExampleService.Announcement:Connect(function(message)
-			ctx.Log.Info("Announcement: %s", message)
-		end)
-	end,
-}
+	ExampleService.Announcement:Connect(function(message)
+		ctx.Log.Info("Announcement: %s", message)
+	end)
+end
+
+return ExampleController

@@ -2,9 +2,11 @@
  * ControllerRegistry — In-memory registry of all discovered controllers.
  */
 
+import { MethodParam } from './ServiceRegistry';
+
 export interface ControllerMethod {
   name: string;
-  params: string[];
+  params: MethodParam[];
   returnType: string | null;
 }
 

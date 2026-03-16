@@ -2,9 +2,14 @@
  * ServiceRegistry — In-memory registry of all discovered services.
  */
 
+export interface MethodParam {
+  name: string;
+  type: string;
+}
+
 export interface ServiceMethod {
   name: string;
-  params: string[];
+  params: MethodParam[];
   returnType: string | null;
 }
 

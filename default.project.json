@@ -1,39 +1,6 @@
 {
 	"name": "kore",
 	"tree": {
-		"$className": "DataModel",
-		"ServerScriptService": {
-			"Services": {
-				"$path": "src/server/services"
-			},
-			"Thread": {
-				"Workers": {
-					"$path": "src/server/Thread/Workers"
-				}
-			},
-			"KoreServer": {
-				"$path": "src/server/KoreServer.server.luau"
-			}
-		},
-		"StarterPlayer": {
-			"StarterPlayerScripts": {
-				"Controllers": {
-					"$path": "src/client/controllers"
-				},
-				"KoreClient": {
-					"$path": "src/client/KoreClient.client.luau"
-				}
-			}
-		},
-		"ReplicatedStorage": {
-			"Packages": {
-				"$path": "DevelopmentMaterial/Packages"
-			},
-			"Shared": {
-				"Kore": {
-					"$path": "src/shared/Kore"
-				}
-			}
-		}
+		"$path": "src/shared/Kore"
 	}
 }

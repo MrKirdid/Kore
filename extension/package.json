@@ -2,7 +2,7 @@
 	"name": "kore-framework",
 	"displayName": "Kore Framework",
 	"description": "VS Code extension for the Kore Roblox Luau game framework — autocomplete, diagnostics, type generation, and more.",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"publisher": "mrkirdid",
 	"engines": {
 		"vscode": "^1.85.0"
@@ -14,7 +14,8 @@
 	],
 	"activationEvents": [
 		"onLanguage:luau",
-		"workspaceContains:**/*.luau"
+		"workspaceContains:**/*.luau",
+		"workspaceContains:Kore.toml"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
@@ -36,6 +37,16 @@
 					"default": "src/shared/Kore/Types.luau",
 					"description": "Output path for the generated Types.luau file"
 				},
+				"kore.koreRequirePath": {
+					"type": "string",
+					"default": "game.ReplicatedStorage.Shared.Packages.kore",
+					"description": "Luau require path for the Kore module (e.g. game.ReplicatedStorage.Shared.Packages.kore)"
+				},
+				"kore.typesRequirePath": {
+					"type": "string",
+					"default": "game.ReplicatedStorage.Shared.Packages.kore.Types",
+					"description": "Luau require path for the Kore Types module"
+				},
 				"kore.enableDiagnostics": {
 					"type": "boolean",
 					"default": true,
@@ -45,6 +56,21 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Enable Kore snippets (::preset, :AddService, :AddController)"
+				},
+				"kore.generateTypes": {
+					"type": "boolean",
+					"default": true,
+					"description": "Auto-generate and update Types.luau on service/controller changes"
+				},
+				"kore.sharedPath": {
+					"type": "string",
+					"default": "src/shared",
+					"description": "Path to the shared code directory (relative to workspace root)"
+				},
+				"kore.autoTemplate": {
+					"type": "boolean",
+					"default": true,
+					"description": "Auto-populate new .luau files with service/controller templates when created in the services or controllers directory"
 				},
 				"kore.fuzzyThreshold": {
 					"type": "number",
@@ -57,13 +83,44 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Log extension internals to the Kore output channel"
+				},
+				"kore.triggerPrefix": {
+					"type": "string",
+					"default": "!",
+					"minLength": 1,
+					"description": "Prefix that triggers Kore autocomplete. Type this at the start of a line followed by a command (e.g. '!require', '!getService')."
+				},
+				"kore.requireCompletion.maxSuggestions": {
+					"type": "number",
+					"default": 25,
+					"minimum": 1,
+					"maximum": 100,
+					"description": "Maximum number of module suggestions shown for !require completions"
+				},
+				"kore.requireCompletion.useDeepestVariable": {
+					"type": "boolean",
+					"default": true,
+					"description": "Use the deepest defined variable for shorter require paths (e.g. Packages.Module instead of ReplicatedStorage.Shared.Packages.Module)"
+				},
+				"kore.requireCompletion.autoInsertGetService": {
+					"type": "boolean",
+					"default": true,
+					"description": "Auto-insert 'local Service = game:GetService(\"Service\")' at the top of the file when a require needs it"
 				}
 			}
 		},
 		"commands": [
 			{
+				"command": "kore.initProject",
+				"title": "Kore: Init Project (Create Kore.toml)"
+			},
+			{
 				"command": "kore.refreshTypes",
 				"title": "Kore: Refresh Types"
+			},
+			{
+				"command": "kore.reindexModules",
+				"title": "Kore: Reindex Modules"
 			},
 			{
 				"command": "kore.openDocs",

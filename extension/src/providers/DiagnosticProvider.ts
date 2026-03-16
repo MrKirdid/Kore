@@ -7,6 +7,8 @@ import * as path from 'path';
 import { serviceRegistry } from '../registry/ServiceRegistry';
 import { controllerRegistry } from '../registry/ControllerRegistry';
 import { FuzzyMatcher } from '../fuzzy/FuzzyMatcher';
+import { getConfig } from '../config/KoreConfig';
+import { logDebug } from '../Logger';
 import {
   extractName,
   extractDependencies,
@@ -27,8 +29,8 @@ export class DiagnosticProvider {
   }
 
   update(document: vscode.TextDocument): void {
-    const config = vscode.workspace.getConfiguration('kore');
-    if (!config.get<boolean>('enableDiagnostics', true)) {
+    const cfg = getConfig();
+    if (!cfg.options.diagnostics) {
       this.diagnosticCollection.delete(document.uri);
       return;
     }
@@ -36,11 +38,12 @@ export class DiagnosticProvider {
     const diagnostics: vscode.Diagnostic[] = [];
     const source = document.getText();
     const filePath = document.uri.fsPath;
-    const servicesPath = config.get<string>('servicesPath', 'src/server/services');
-    const controllersPath = config.get<string>('controllersPath', 'src/client/controllers');
+    const servicesPath = cfg.paths.services;
+    const controllersPath = cfg.paths.controllers;
 
-    const isService = filePath.includes(servicesPath);
-    const isController = filePath.includes(controllersPath);
+    const normFilePath = filePath.replace(/\\/g, '/');
+    const isService = normFilePath.includes(`/${servicesPath}/`) || normFilePath.endsWith(`/${servicesPath}`);
+    const isController = normFilePath.includes(`/${controllersPath}/`) || normFilePath.endsWith(`/${controllersPath}`);
 
     if (isService) {
       this.checkService(document, source, filePath, diagnostics);
@@ -53,6 +56,7 @@ export class DiagnosticProvider {
     this.checkGetControllerCalls(document, source, diagnostics);
 
     this.diagnosticCollection.set(document.uri, diagnostics);
+    logDebug(`Diagnostics: ${diagnostics.length} issue(s) in ${path.basename(filePath)} (service=${isService}, controller=${isController})`);
   }
 
   private checkService(
@@ -119,8 +123,9 @@ export class DiagnosticProvider {
     }
 
     // Check Client table
-    const clientSource = extractClientTable(source);
-    if (clientSource) {
+    const clientResult = extractClientTable(source);
+    if (clientResult) {
+      const clientSource = clientResult.content;
       const clientFunctions = extractFunctions(clientSource);
       const clientMethodNames = new Set(clientFunctions.map(f => f.name));
 
@@ -151,7 +156,7 @@ export class DiagnosticProvider {
 
     // NetEvent outside Client table
     const netEventOutside = source.match(/Kore\.NetEvent/g);
-    if (netEventOutside && !clientSource) {
+    if (netEventOutside && !clientResult) {
       diagnostics.push(this.createSimpleDiagnostic(
         document, source, 'Kore.NetEvent',
         'Kore.NetEvent used outside the Client table',
@@ -229,7 +234,8 @@ export class DiagnosticProvider {
     source: string,
     diagnostics: vscode.Diagnostic[]
   ): void {
-    const pattern = /GetService\s*\(\s*["']([^"']+)["']\s*\)/g;
+    // Only match Kore.GetService / Kore:GetService — NOT game:GetService
+    const pattern = /Kore[.:]+GetService\s*\(\s*["']([^"']+)["']\s*\)/g;
     let match;
 
     while ((match = pattern.exec(source)) !== null) {
@@ -258,7 +264,8 @@ export class DiagnosticProvider {
     source: string,
     diagnostics: vscode.Diagnostic[]
   ): void {
-    const pattern = /GetController\s*\(\s*["']([^"']+)["']\s*\)/g;
+    // Only match Kore.GetController / Kore:GetController
+    const pattern = /Kore[.:]+GetController\s*\(\s*["']([^"']+)["']\s*\)/g;
     let match;
 
     while ((match = pattern.exec(source)) !== null) {

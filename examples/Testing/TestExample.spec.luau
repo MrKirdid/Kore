@@ -1,7 +1,7 @@
 -- examples/Testing/TestExample.spec.luau
 -- Demonstrates testing a service in isolation with Kore.Mock.
 
-local Kore = require(game.ReplicatedStorage.Shared.Kore)
+local Kore = require(game.ReplicatedStorage.Shared.Packages.kore)
 
 return function()
 	describe("ExampleService", function()
